@@ -43,13 +43,23 @@ from trossen_arm_mujoco.constants import ASSETS_DIR, DT
 def sample_box_pose() -> np.ndarray:
     """
     Generate a random pose for a cube within predefined position ranges.
+    
+    The spawn area is constrained to:
+    - Avoid the blue target box (at y=0.22, size 0.1x0.1)
+    - Stay within robot reach
+    - Stay on the table surface
+    
+    Blue box: centered at (0, 0.22), extends from x=[-0.1, 0.1], y=[0.12, 0.32]
+    Safe spawn area: in front of blue box, within robot reach
 
     :return: A 7D array containing the sampled position ``[x, y, z, w, x, y, z]`` representing the
         cube's position and orientation as a quaternion.
     """
-    x_range = [-0.1, 0.2]
-    y_range = [-0.15, 0.15]
-    z_range = [0.0125, 0.0125]
+    # Constrained spawn area (in front of blue box, centered, reachable)
+    # Blue box is at y=0.22, so stay below y=0.1 to avoid it
+    x_range = [-0.08, 0.08]   # Centered, within easy reach
+    y_range = [-0.08, 0.08]   # In front of blue box (blue box starts at y=0.12)
+    z_range = [0.0125, 0.0125]  # On table surface (cube half-height)
 
     ranges = np.vstack([x_range, y_range, z_range])
     cube_position = np.random.uniform(ranges[:, 0], ranges[:, 1])

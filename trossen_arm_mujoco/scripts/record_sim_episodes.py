@@ -99,7 +99,7 @@ def main(args):
             onscreen_render=onscreen_render,
             cam_list=cam_list,
         )
-        ts = env.reset()
+        ts = env.reset() # you get timestep object with observation, reward, discount, step_type
         episode = [ts]
         policy = policy_cls(inject_noise)
         # setup plotting

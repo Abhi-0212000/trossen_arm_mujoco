@@ -66,6 +66,13 @@ START_ARM_POSE = [
     0.044,
 ]
 
+# CRITICAL: These values MUST match the training data starting position!
+# Computed from dataset_latest_clean0.05_shift5_clip_normphys.pkl step 0
+START_ARM_POSE_MEAN = [
+    -0.000544, 0.005546, 0.014228, -0.004537, 0.000244, -0.002860, 0.035994, 0.035993,  # Left arm
+    0.000190, 0.001273, 0.019751, -0.012350, -0.002097, -0.001226, 0.035997, 0.035997,  # Right arm
+]
+
 # Get the path to the assets directory
 ASSETS_DIR = str(files("trossen_arm_mujoco").joinpath("assets"))
 

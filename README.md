@@ -52,39 +52,67 @@ This folder contains all required MuJoCo XML configuration files, URDF files, an
 
 ### Key Files:
 
-- `trossen_ai.xml` → Base model definition of the Trossen AI robot.
-- `trossen_ai_scene.xml` → Uses mocap bodies to control the simulated arms.
-- `trossen_ai_scene_joint.xml` → Uses joint controllers similar to real hardware to control the simulated arms.
-- `wxai_follower.urdf` & `wxai_follower.xml` → URDF and XML descriptions of the follower arms.
-- `meshes/` → Contains STL and OBJ files for the robot components, including arms, cameras, and environmental objects.
+- **`trossen_ai_bimanual.xml`** → Base robot definition with mocap bodies for end-effector control (includes dual arms, grippers, actuators).
+- **`trossen_ai_joint.xml`** → Base robot definition with joint position controllers for hardware-like control.
+- **`trossen_ai_scene.xml`** → Complete scene including `trossen_ai_bimanual.xml` + table + cameras + objects (uses mocap control).
+- **`trossen_ai_scene_joint.xml`** → Complete scene including `trossen_ai_joint.xml` + table + cameras + objects (uses joint controllers).
+- **`wxai_follower.urdf`** & **`wxai_follower.xml`** → URDF and XML descriptions of a single follower arm.
+- **`meshes/`** → Contains STL and OBJ files for the robot components, including arms, grippers, cameras, and environmental objects.
 
 ### Motion Capture vs Joint-Controlled Environments:
 
-- Motion Capture (`trossen_ai_scene.xml`): Uses predefined mocap bodies that move the robot arms based on scripted end effector movements.
-- Joint Control (`trossen_ai_scene_joint.xml`): Uses position controllers for each joint, similar to a real-world robot setup.
+- **Motion Capture** (`trossen_ai_scene.xml`): Uses mocap bodies to directly control end-effector positions. Actions are Cartesian coordinates (x,y,z, quaternion, gripper). Used with `ee_sim_env.py` for scripted trajectory generation.
+- **Joint Control** (`trossen_ai_scene_joint.xml`): Uses position controllers for each joint, similar to real hardware. Actions are joint angles (6 joints + gripper per arm). Used with `sim_env.py` for realistic control and RL training.
 
 ## 2. Modules ([`trossen_arm_mujoco`](./trossen_arm_mujoco/))
 
 This folder contains all Python modules necessary for running simulations, executing policies, recording episodes, and visualizing results.
 
-### 2.1 Simulations
+### 2.1 Core Modules
 
-- `ee_sim_env.py`
-  - Loads `trossen_ai_scene.xml` (motion capture-based control).
-  - The arms move by following the positions commanded to the mocap bodies.
-  - Used for generating scripted policies that control the robot’s arms in predefined ways.
+- **`constants.py`**
+  - Task configurations (episode length, cameras, number of episodes)
+  - Fixed simulation parameters: `DT=0.02` (control timestep), `START_ARM_POSE` (initial joint positions)
+  - Path to assets directory
+  - `SIM_TASK_CONFIGS` dictionary for task-specific settings
 
-- `sim_env.py`
-  - Loads `trossen_ai_scene_joint.xml` (position-controlled joints).
-  - Uses joint controllers instead of mocap bodies.
-  - Replays joint trajectories from `ee_sim_env.py`, enabling clean simulation visuals without mocap bodies visible in the rendered output.
+- **`ee_sim_env.py`** (End-Effector Control Environment)
+  - Loads `trossen_ai_scene.xml` (motion capture-based control)
+  - **Classes**: `TrossenAIStationaryEETask` (base), `TransferCubeEETask` (transfer task)
+  - **Action space**: 14D Cartesian commands `[x,y,z, quat(4), gripper] × 2 arms`
+  - **Purpose**: Generate scripted trajectories, collect joint position data
+  - The arms move by directly commanding mocap body positions
 
-### 2.2 Scripted Policy Execution
+- **`sim_env.py`** (Joint Control Environment)
+  - Loads `trossen_ai_scene_joint.xml` (position-controlled joints)
+  - **Classes**: `TrossenAIStationaryTask` (base), `TransferCubeTask` (transfer task)
+  - **Action space**: 14D joint commands `[6 joint angles + gripper] × 2 arms`
+  - **Purpose**: Replay trajectories with realistic joint control, used for RL training
+  - Uses position controllers similar to real hardware
 
-- `scripted_policy.py`
-  - Defines pre-scripted movements for the robot arms to perform tasks like picking up objects.
-  - Uses the motion capture bodies to generate smooth movement trajectories.
-  - In the current setup, a policy is designed to pick up a red block, with randomized block positions in the environment.
+- **`scripted_policy.py`**
+  - **Classes**: `BasePolicy`, `PickAndTransferPolicy`
+  - Defines pre-scripted movements for robot arms (e.g., pick and transfer cube)
+  - Generates time-indexed waypoints with target positions, orientations, and gripper states
+  - Used for demonstration data collection (not for RL policy learning)
+
+- **`utils.py`**
+  - **`sample_box_pose()`**: Randomize object positions within bounds
+  - **`get_observation_base()`**: Capture multi-camera image observations
+  - **`make_sim_env()`**: Create dm_control Environment wrapper
+  - **`plot_observation_images()`**: Visualization helpers for debugging
+
+### 2.2 Usage Summary
+
+For **RL training** (e.g., SERL integration):
+- Use `sim_env.py` (joint control) with `trossen_ai_scene_joint.xml`
+- 14D action space: joint angles + gripper commands
+- Wrap in gym.Env interface for standard RL algorithms
+
+For **scripted demonstrations**:
+- Use `ee_sim_env.py` (end-effector control) with `trossen_ai_scene.xml`
+- Generate trajectories with `scripted_policy.py`
+- Collect demonstration data for behavior cloning
 
 ## 3. How the Data Collection Works
 
@@ -255,3 +283,108 @@ If you encounter into Mesa Loader or `mujoco.FatalError: gladLoadGL error` error
 ```bash
 export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
 ```
+
+
+### `env.reset()` in `dm_control` which was used in `trossen_arm_mujoco` does the following in order.
+```plaintext
+env.reset()
+   └─ physics.reset()
+   └─ task.initialize_episode(physics)
+   └─ obs = task.get_observation(physics)
+   └─ return TimeStep.first(obs)
+```
+and `ts` looks like:
+ts = env.reset()
+```plaintext
+ts.observation = {'qpos': [...], 'qvel': [...], 'images': {...}, ...}
+ts.reward = 0.0 (initial)
+ts.discount = 1.0
+ts.step_type = StepType.FIRST
+```
+
+ts = env.step(action)
+```plaintext
+Internally:
+1. physics.step() → advances MuJoCo simulation
+2. task.get_observation(physics) → builds observation dict
+3. task.get_reward(physics) → computes reward
+4. returns TimeStep with observation, reward, discount, step_type
+```
+
+---
+
+## Control Modes & Dataset Format
+
+### Control Modes
+
+| Mode | Action Dim | Action Format | XML Scene |
+|------|------------|---------------|------------|
+| `joint` | 14 | `[L_Arm(6), L_Grip(1), R_Arm(6), R_Grip(1)]` | `trossen_ai_scene_joint.xml` |
+| `ee` | 16 | `[L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]` | `trossen_ai_scene.xml` |
+
+### HDF5 Dataset Format
+
+**Joint Mode:**
+```
+episode_X.hdf5
+├── observations/
+│   ├── qpos               (T, 16) float32   # Joint positions
+│   ├── qvel               (T, 16) float32   # Joint velocities
+│   ├── cube_pose          (T, 7) float32    # [x, y, z, qw, qx, qy, qz] cube pose
+│   └── images/
+│       ├── cam_high       (T, 480, 640, 3) uint8
+│       ├── cam_low        (T, 480, 640, 3) uint8
+│       ├── cam_left_wrist (T, 480, 640, 3) uint8
+│       └── cam_right_wrist(T, 480, 640, 3) uint8
+├── action                 (T, 14) float32   # [L_Arm(6), L_Grip(1), R_Arm(6), R_Grip(1)]
+├── reward                 (T,) float32
+└── done                   (T,) bool
+```
+
+**EE Mode (additional fields):**
+```
+episode_X.hdf5
+├── observations/
+│   ├── qpos               (T, 16) float32   # Joint positions
+│   ├── qvel               (T, 16) float32   # Joint velocities
+│   ├── cube_pose          (T, 7) float32    # [x, y, z, qw, qx, qy, qz] cube pose
+│   ├── mocap_pose_left    (T, 7) float32    # [pos(3), quat(4)] world frame
+│   ├── mocap_pose_right   (T, 7) float32    # [pos(3), quat(4)] world frame
+│   ├── robot0_eef_pos     (T, 6) float32    # [L_pos(3), R_pos(3)]
+│   ├── robot0_eef_quat    (T, 8) float32    # [L_quat(4), R_quat(4)]
+│   ├── robot0_gripper_qpos(T, 2) float32    # [L_grip, R_grip]
+│   └── images/
+│       └── ... (same as joint mode)
+├── action                 (T, 16) float32   # [L_Pos(3), L_Quat(4), L_Grip(1), R_...]
+├── reward                 (T,) float32
+└── done                   (T,) bool
+```
+
+---
+
+## Simulation Timing & Frequency
+
+### Quick Math
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Physics timestep | 0.001s (1000 Hz) | `trossen_ai_bimanual.xml` → `<option timestep="0.001"/>` |
+| Control timestep | 0.02s (50 Hz) | `constants.py` → `DT = 0.02` |
+| Sub-steps per action | 20 | `control_dt / physics_dt = 0.02 / 0.001` |
+
+### What Happens in `env.step(action)`
+
+```
+env.step(action)
+   └─ for _ in range(20):      # n_sub_steps = control_dt / physics_dt
+        task.before_step(action)  # Apply same action
+        physics.step()            # 1ms physics update
+   └─ task.get_observation()    # Render cameras, get state
+   └─ return TimeStep
+```
+
+**Key Points:**
+- Each `env.step()` call simulates **20ms of real time** (20 × 1ms physics steps)
+- The action is **held constant** for all 20 sub-steps
+- You get observations at **50 Hz** (every 20ms)
+- Data recording at every step = 50 Hz data rate
