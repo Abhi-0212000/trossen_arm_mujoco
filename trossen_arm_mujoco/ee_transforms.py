@@ -167,6 +167,23 @@ def quaternion_to_angle_axis(quat: np.ndarray) -> np.ndarray:
     return rot.as_rotvec()
 
 
+def quaternion_to_euler(quat: np.ndarray, seq: str = 'xyz') -> np.ndarray:
+    """
+    Convert quaternion to Euler angles.
+    
+    Args:
+        quat: Quaternion [w, x, y, z]
+        seq: Euler angle sequence (default: 'xyz' = roll, pitch, yaw)
+    
+    Returns:
+        Euler angles [roll, pitch, yaw] in radians
+    """
+    # Convert to scipy format [x, y, z, w]
+    q_scipy = np.array([quat[1], quat[2], quat[3], quat[0]])
+    rot = R.from_quat(q_scipy)
+    return rot.as_euler(seq)
+
+
 def transform_robot_to_world_frame(
     pos_robot: np.ndarray,
     quat_robot: np.ndarray,

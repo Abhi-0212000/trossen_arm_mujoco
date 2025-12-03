@@ -352,13 +352,25 @@ episode_X.hdf5
 │   ├── mocap_pose_right   (T, 7) float32    # [pos(3), quat(4)] world frame
 │   ├── robot0_eef_pos     (T, 6) float32    # [L_pos(3), R_pos(3)]
 │   ├── robot0_eef_quat    (T, 8) float32    # [L_quat(4), R_quat(4)]
+│   ├── robot0_eef_angle_axis (T, 6) float32 # [L_aa(3), R_aa(3)] raw leader format
+│   ├── robot0_eef_euler   (T, 6) float32    # [L_rpy(3), R_rpy(3)] roll/pitch/yaw
 │   ├── robot0_gripper_qpos(T, 2) float32    # [L_grip, R_grip]
 │   └── images/
 │       └── ... (same as joint mode)
 ├── action                 (T, 16) float32   # [L_Pos(3), L_Quat(4), L_Grip(1), R_...]
+├── action_angle_axis      (T, 14) float32   # [L_Pos(3), L_AA(3), L_Grip(1), R_...]  
 ├── reward                 (T,) float32
 └── done                   (T,) bool
 ```
+
+**Orientation Representations:**
+| Format | Dim | Description | Use Case |
+|--------|-----|-------------|----------|
+| `quat` (wxyz) | 4 | Quaternion | MuJoCo native, no gimbal lock |
+| `angle_axis` | 3 | Rotation vector (axis × angle) | Raw leader format, compact |
+| `euler` | 3 | Roll, pitch, yaw (xyz) | Human interpretable |
+
+The dataset saves **all three formats** so you can train policies with different representations without re-collecting data.
 
 ---
 

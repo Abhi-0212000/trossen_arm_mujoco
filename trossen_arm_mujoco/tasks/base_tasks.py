@@ -424,6 +424,24 @@ class TrossenAIStationaryEETask(base.Task):
             obs["qpos"][14:15]   # Right gripper (one finger)
         ])
         
+        # === ALTERNATIVE ORIENTATION REPRESENTATIONS ===
+        # Save multiple formats so we don't need to re-collect data if one doesn't work well
+        from trossen_arm_mujoco.ee_transforms import quaternion_to_angle_axis, quaternion_to_euler
+        
+        left_quat = obs["mocap_pose_left"][3:]   # [w, x, y, z]
+        right_quat = obs["mocap_pose_right"][3:] # [w, x, y, z]
+        
+        # Angle-axis: raw format from leader arms [rx, ry, rz] (3D per arm)
+        # This is what driver.get_cartesian_positions() returns for orientation
+        left_rotvec = quaternion_to_angle_axis(left_quat)
+        right_rotvec = quaternion_to_angle_axis(right_quat)
+        obs["robot0_eef_angle_axis"] = np.concatenate([left_rotvec, right_rotvec])
+        
+        # Euler angles (roll, pitch, yaw) - 6D total [L_r, L_p, L_y, R_r, R_p, R_y]
+        left_euler = quaternion_to_euler(left_quat)
+        right_euler = quaternion_to_euler(right_quat)
+        obs["robot0_eef_euler"] = np.concatenate([left_euler, right_euler])
+        
         return obs
 
     def get_reward(self, physics: Physics) -> float:

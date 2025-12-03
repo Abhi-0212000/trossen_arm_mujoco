@@ -14,6 +14,7 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, TextBox
+from trossen_arm_mujoco.ee_transforms import quaternion_to_angle_axis
 
 
 class SimDataCollector:
@@ -71,7 +72,8 @@ class SimDataCollector:
                 "images": {cam: [] for cam in self.cam_list},
                 # Other fields added dynamically from dm_obs
             },
-            "action": [],
+            "action": [],           # 16D: [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+            "action_angle_axis": [], # 14D: [L_Pos(3), L_AA(3), L_Grip(1), R_Pos(3), R_AA(3), R_Grip(1)]
             "reward": [],
             "done": []
         }
@@ -189,7 +191,11 @@ class SimDataCollector:
                 if len(data) > 0:
                     obs_grp.create_dataset(key, data=np.array(data))
             
+            # Save actions in both formats
             root.create_dataset("action", data=np.array(self.current_episode_data["action"]))
+            if len(self.current_episode_data["action_angle_axis"]) > 0:
+                root.create_dataset("action_angle_axis", data=np.array(self.current_episode_data["action_angle_axis"]))
+            
             root.create_dataset("reward", data=np.array(self.current_episode_data["reward"]))
             root.create_dataset("done", data=np.array(self.current_episode_data["done"]))
             
@@ -304,7 +310,24 @@ class SimDataCollector:
                     self.current_episode_data["observations"][key] = []
                 self.current_episode_data["observations"][key].append(value)
             
+            # Save action in quaternion format (16D for EE mode, 14D for joint mode)
             self.current_episode_data["action"].append(action)
+            
+            # Also save angle-axis format for EE mode (14D alternative to 16D quaternion)
+            # This allows training with either representation without re-collecting data
+            if len(action) == 16:  # EE mode with quaternions
+                # Convert: [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+                #      to: [L_Pos(3), L_AA(3),   L_Grip(1), R_Pos(3), R_AA(3),   R_Grip(1)]
+                left_aa = quaternion_to_angle_axis(action[3:7])
+                right_aa = quaternion_to_angle_axis(action[11:15])
+                action_aa = np.concatenate([
+                    action[0:3], left_aa, action[7:8],    # Left: pos, aa, grip
+                    action[8:11], right_aa, action[15:16] # Right: pos, aa, grip
+                ])
+                self.current_episode_data["action_angle_axis"].append(action_aa)
+            else:  # Joint mode (14D) - no conversion needed
+                self.current_episode_data["action_angle_axis"].append(action)
+            
             self.current_episode_data["reward"].append(reward)
             self.current_episode_data["done"].append(done)
             
