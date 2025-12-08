@@ -248,12 +248,13 @@ class TrossenAIStationaryEETask(base.Task):
     The action is processed in before_step():
     1. Split into left/right EE pose and gripper components
     2. Set mocap_pos and mocap_quat for each arm
-    3. Set gripper qpos directly (not via ctrl)
+    3. Set gripper via ctrl actuators (respects physics)
     
     Control Mechanism:
     - Mocap bodies (mocap_left, mocap_right) are welded to end-effectors
     - MuJoCo's equality constraints enforce IK-like behavior
-    - Gripper controlled via direct qpos manipulation
+    - Grippers controlled via actuators: ctrl[0]=left, ctrl[1]=right
+    - Equality constraints couple both fingers on each gripper
     
     Subclasses should implement:
     - initialize_episode(): Set initial robot pose and environment state
@@ -289,19 +290,30 @@ class TrossenAIStationaryEETask(base.Task):
         Action mapping:
             action[0:3]   -> Left EE position (mocap_pos[0])
             action[3:7]   -> Left EE quaternion wxyz (mocap_quat[0])
-            action[7]     -> Left gripper (qpos[6:8])
+            action[7]     -> Left gripper (ctrl[0])
             action[8:11]  -> Right EE position (mocap_pos[1])
             action[11:15] -> Right EE quaternion wxyz (mocap_quat[1])
-            action[15]    -> Right gripper (qpos[14:16])
+            action[15]    -> Right gripper (ctrl[1])
         
         Args:
             action: 16D array [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
             physics: MuJoCo physics instance
         """
+        # DEBUG: Print incoming action from policy (16D after angle-axis to quat conversion)
+        if self.counter % 50 == 0:
+            print(f"\n[DEBUG base_tasks.before_step] Step {self.counter}")
+            print(f"  Incoming action (16D): {action}")
+            print(f"  Action shape: {action.shape}")
+        
         # Split action into left and right halves
         a_len = len(action) // 2  # 8
         action_left = action[:a_len]
         action_right = action[a_len:]
+        
+        # DEBUG: Print split actions
+        if self.counter % 50 == 0:
+            print(f"  Left action (8D):  pos={action_left[:3]}, quat={action_left[3:7]}, grip={action_left[7]}")
+            print(f"  Right action (8D): pos={action_right[:3]}, quat={action_right[3:7]}, grip={action_right[7]}")
         
         # Set mocap positions and orientations
         # Left arm (mocap index 0)
@@ -312,18 +324,35 @@ class TrossenAIStationaryEETask(base.Task):
         np.copyto(physics.data.mocap_pos[1], action_right[:3])
         np.copyto(physics.data.mocap_quat[1], action_right[3:7])
 
-        # Set gripper positions directly via qpos
-        # Left gripper: qpos[6] and qpos[7] (both fingers)
-        physics.data.qpos[6] = action_left[7]
-        physics.data.qpos[7] = action_left[7]
+        # Set gripper positions via actuators (not direct qpos)
+        # Gripper values are NORMALIZED [-1, +1] from BC policy:
+        #   -1.0 = closed (0.0 meters)
+        #   +1.0 = open (0.044 meters)
+        # MuJoCo actuators expect physical position in meters
+        GRIPPER_MIN = 0.0
+        GRIPPER_MAX = 0.044
         
-        # Right gripper: qpos[14] and qpos[15] (both fingers)
-        physics.data.qpos[14] = action_right[7]
-        physics.data.qpos[15] = action_right[7]
+        # Denormalize: physical = (normalized + 1) / 2 * range + min
+        left_grip_physical = (np.clip(action_left[7], -1, 1) + 1.0) / 2.0 * (GRIPPER_MAX - GRIPPER_MIN) + GRIPPER_MIN
+        right_grip_physical = (np.clip(action_right[7], -1, 1) + 1.0) / 2.0 * (GRIPPER_MAX - GRIPPER_MIN) + GRIPPER_MIN
+        
+        # DEBUG: Print gripper conversion
+        if self.counter % 50 == 0:
+            print(f"  Gripper conversion:")
+            print(f"    Left:  normalized={action_left[7]:.4f} -> physical={left_grip_physical:.4f}m")
+            print(f"    Right: normalized={action_right[7]:.4f} -> physical={right_grip_physical:.4f}m")
+            print(f"  Final MuJoCo commands:")
+            print(f"    mocap_pos[0] (L): {physics.data.mocap_pos[0]}")
+            print(f"    mocap_pos[1] (R): {physics.data.mocap_pos[1]}")
+            print(f"    ctrl[0] (L grip): {left_grip_physical:.4f}")
+            print(f"    ctrl[1] (R grip): {right_grip_physical:.4f}")
+        
+        physics.data.ctrl[0] = left_grip_physical   # left gripper motor
+        physics.data.ctrl[1] = right_grip_physical  # right gripper motor
         
         self.counter += 1
         # Note: We don't call super().before_step() for EE control
-        # because we're not using the actuator system
+        # because mocap bodies handle arm positioning (not actuators)
 
     def initialize_robots(self, physics: Physics) -> None:
         """
@@ -331,16 +360,19 @@ class TrossenAIStationaryEETask(base.Task):
         
         This should be called at the start of each episode to:
         1. Reset arm joints to home position
-        2. Align mocap bodies with current end-effector positions
+        2. Set gripper actuators to open position
+        3. Align mocap bodies with current end-effector positions
         """
-        # Reset joint positions (only arm joints, not grippers)
+        # Reset joint positions (arm joints only)
         # Using first 6 joints from each arm in START_ARM_POSE
-        physics.named.data.qpos[:6] = START_ARM_POSE[:6]      # Left arm
-        physics.named.data.qpos[8:14] = START_ARM_POSE[8:14]  # Right arm
-        
-        # Reset grippers to open position
-        physics.data.qpos[6:8] = START_ARM_POSE[6:8]    # Left gripper
-        physics.data.qpos[14:16] = START_ARM_POSE[14:16]  # Right gripper
+        physics.named.data.qpos[:6] = START_ARM_POSE[:6]      # Left arm joints 0-5
+        physics.named.data.qpos[8:14] = START_ARM_POSE[8:14]  # Right arm joints 8-13
+
+        # Reset grippers via actuators (open position = 0.04)
+        # This respects physics instead of directly setting qpos
+        GRIPPER_OPEN = 0.04
+        physics.data.ctrl[0] = GRIPPER_OPEN  # Left gripper actuator
+        physics.data.ctrl[1] = GRIPPER_OPEN  # Right gripper actuator
 
         # Initialize mocap bodies to align with end-effectors
         # These positions are the home EE positions in world frame
@@ -377,7 +409,7 @@ class TrossenAIStationaryEETask(base.Task):
             OrderedDict with keys:
             - 'images': Dict of camera images (if onscreen_render=True)
             - 'qpos': 16D joint positions
-            - 'qvel': 16D joint velocities
+            - 'qvel': 16D joint velocitiesget_observation
             - 'env_state': Task-specific environment state
             - 'cube_pose': 7D [x, y, z, qw, qx, qy, qz] cube position and orientation
             - 'mocap_pose_left': 7D [pos(3), quat(4)] left EE pose
@@ -409,16 +441,21 @@ class TrossenAIStationaryEETask(base.Task):
         ])
         obs["gripper_ctrl"] = physics.data.ctrl.copy()
         
-        # SERL/IBRL compatible keys
+        # SERL/IBRL compatible keys - combined format (both arms together)
+        # robot0_eef_pos: 6D [left_x, left_y, left_z, right_x, right_y, right_z]
+        #                    indices [0:3] = left arm, [3:6] = right arm
         obs["robot0_eef_pos"] = np.concatenate([
             obs["mocap_pose_left"][:3],
             obs["mocap_pose_right"][:3]
         ])
+        # robot0_eef_quat: 8D [left_w, left_x, left_y, left_z, right_w, right_x, right_y, right_z]
+        #                     indices [0:4] = left arm, [4:8] = right arm
         obs["robot0_eef_quat"] = np.concatenate([
             obs["mocap_pose_left"][3:],
             obs["mocap_pose_right"][3:]
         ])
-        # Single gripper value per arm (not both fingers)
+        # robot0_gripper_qpos: 2D [left_gripper, right_gripper]
+        #                         index [0] = left arm, [1] = right arm
         obs["robot0_gripper_qpos"] = np.concatenate([
             obs["qpos"][6:7],    # Left gripper (one finger)
             obs["qpos"][14:15]   # Right gripper (one finger)

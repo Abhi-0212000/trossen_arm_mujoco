@@ -40,29 +40,48 @@ import numpy as np
 from trossen_arm_mujoco.constants import ASSETS_DIR, DT
 
 
-def sample_box_pose() -> np.ndarray:
+def sample_box_pose(seed: int = None, rng: np.random.Generator = None) -> np.ndarray:
     """
     Generate a random pose for a cube within predefined position ranges.
     
     The spawn area is constrained to:
+    - Small centered area to ensure robot can reach
     - Avoid the blue target box (at y=0.22, size 0.1x0.1)
     - Stay within robot reach
     - Stay on the table surface
     
     Blue box: centered at (0, 0.22), extends from x=[-0.1, 0.1], y=[0.12, 0.32]
-    Safe spawn area: in front of blue box, within robot reach
+    Safe spawn area: small center zone, well away from blue box
 
+    Args:
+        seed: Optional random seed for reproducibility. If provided, creates a new RNG.
+        rng: Optional numpy random Generator. If provided, uses this instead of seed.
+             Takes precedence over seed if both are provided.
+             If neither seed nor rng is provided, uses global np.random state.
+    
     :return: A 7D array containing the sampled position ``[x, y, z, w, x, y, z]`` representing the
         cube's position and orientation as a quaternion.
     """
-    # Constrained spawn area (in front of blue box, centered, reachable)
-    # Blue box is at y=0.22, so stay below y=0.1 to avoid it
-    x_range = [-0.08, 0.08]   # Centered, within easy reach
-    y_range = [-0.08, 0.08]   # In front of blue box (blue box starts at y=0.12)
+    # Very small centered spawn area to avoid gripper wings colliding with blue box
+    # Blue box is at y=0.22, so we keep red cube near origin (y ~ 0)
+    # Reduced from ±0.04 to ±0.02 for safety margin
+    x_range = [-0.02, 0.02]   # Very small centered area
+    y_range = [-0.02, 0.02]   # Keep well away from blue box at y=0.22
     z_range = [0.0125, 0.0125]  # On table surface (cube half-height)
 
     ranges = np.vstack([x_range, y_range, z_range])
-    cube_position = np.random.uniform(ranges[:, 0], ranges[:, 1])
+    
+    # Choose random source based on arguments
+    if rng is not None:
+        # Use provided Generator
+        cube_position = rng.uniform(ranges[:, 0], ranges[:, 1])
+    elif seed is not None:
+        # Create seeded Generator for this call only
+        local_rng = np.random.default_rng(seed)
+        cube_position = local_rng.uniform(ranges[:, 0], ranges[:, 1])
+    else:
+        # Use global numpy random state (respects np.random.seed())
+        cube_position = np.random.uniform(ranges[:, 0], ranges[:, 1])
 
     cube_quat = np.array([1, 0, 0, 0])
     return np.concatenate([cube_position, cube_quat])

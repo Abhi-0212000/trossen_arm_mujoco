@@ -1,6 +1,38 @@
 """
 Sim Data Collector - Interactive GUI for recording simulation episodes.
 
+=== HDF5 DATASET STRUCTURE in EE Mode===
+
+Each HDF5 file (e.g., episode_0.hdf5) contains the following keys:
+
+1. **action** (N, 16) [EE Mode]:
+   - The RAW command sent to the robot.
+   - Format: [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+   - Quaternions are [w, x, y, z] (MuJoCo convention).
+
+2. **action_angle_axis** (N, 14) [EE Mode]:
+   - A derived version of 'action' for convenience.
+   - Converts Quaternions to Angle-Axis (3D vector).
+   - Format: [L_Pos(3), L_AA(3), L_Grip(1), R_Pos(3), R_AA(3), R_Grip(1)]
+   - Useful for training policies that output Angle-Axis instead of Quaternions.
+
+3. **observations/** (Group):
+   - Contains the STATE of the simulation (what happened).
+   
+   - **robot0_eef_pos** (N, 6): Actual EE Position [L_Pos(3), R_Pos(3)].
+   - **robot0_eef_quat** (N, 8): Actual EE Orientation (Quat) [L_Quat(4), R_Quat(4)].
+   - **robot0_eef_angle_axis** (N, 6): Actual EE Orientation (Angle-Axis).
+   - **robot0_eef_euler** (N, 6): Actual EE Orientation (Euler).
+   
+   - **qpos** (N, 16): Joint positions.
+   - **qvel** (N, 16): Joint velocities.
+   - **images/**: Camera feeds (compressed).
+
+=== KEY DISTINCTION ===
+- **action_*** keys are what the LEADER (human/policy) *commanded*.
+- **observations/robot0_eef_*** keys are where the FOLLOWER (sim robot) *actually was*.
+- They should be very close, but not identical due to physics/tracking errors.
+
 Dataset format and control modes documented in README.md:
     - Section: "Control Modes & Dataset Format"
     
@@ -367,8 +399,10 @@ def main():
                         help="Max steps per episode")
     parser.add_argument("--arm_type", type=str, default="widowx",
                         choices=["widowx", "viperx"], help="Robot arm type")
-    parser.add_argument("--control_mode", type=str, default="joint",
+    parser.add_argument("--control_mode", type=str, default="ee",
                         choices=["joint", "ee"], help="Control mode: joint (14D) or ee (16D)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed for reproducible cube placement. If not set, uses random seed each reset.")
     # Teleoperation args
     parser.add_argument("--leader_left_ip", type=str, default="192.168.1.4",
                         help="Left leader robot IP (e.g., 192.168.1.4). If not set, uses random actions.")
@@ -392,6 +426,7 @@ def main():
     print(f"  Max Episode Length: {args.max_episode_length}")
     print(f"  Arm Type: {args.arm_type}")
     print(f"  Control Mode: {args.control_mode} ({'14D' if args.control_mode == 'joint' else '16D'})")
+    print(f"  Seed: {args.seed if args.seed is not None else 'random'}")
     if teleop_enabled:
         print(f"  Teleop Mode: ENABLED")
         print(f"    Left Leader IP: {args.leader_left_ip}")
@@ -434,6 +469,25 @@ def main():
             print(f"✓ Both leaders connected")
             print(f"  Left: {driver_left.get_num_joints()} joints")
             print(f"  Right: {driver_right.get_num_joints()} joints")
+            
+            # Open grippers first (position mode)
+            print("\n🔓 Opening grippers...")
+            GRIPPER_OPEN = 0.04  # meters (fully open)
+            
+            driver_left.set_all_modes(trossen_arm.Mode.position)
+            driver_right.set_all_modes(trossen_arm.Mode.position)
+            
+            # Set gripper to open position (index 6 is gripper)
+            left_pos = np.array(driver_left.get_all_positions())
+            right_pos = np.array(driver_right.get_all_positions())
+            left_pos[6] = GRIPPER_OPEN
+            right_pos[6] = GRIPPER_OPEN
+            driver_left.set_all_positions(left_pos)
+            driver_right.set_all_positions(right_pos)
+            
+            import time
+            time.sleep(0.5)  # Wait for grippers to open
+            print("✓ Grippers opened")
             
             # Set leaders to external effort mode (free to move)
             print("\n🎮 Setting leaders to external effort mode (free to move)...")
@@ -544,7 +598,7 @@ def main():
     
     # Main loop
     try:
-        obs, info = env.reset()
+        obs, info = env.reset(seed=args.seed)
         episode_done_printed = False  # Track if we already printed done message
         
         # If teleop enabled, sync sim robots to leader positions first
@@ -581,7 +635,7 @@ def main():
                 reset_env_requested[0] = False
                 episode_done_printed = False  # Reset the flag
                 print("[Reset] Executing environment reset...")
-                obs, info = env.reset()
+                obs, info = env.reset(seed=args.seed)
                 
                 # If teleop, sync to leader positions after reset
                 if teleop_enabled:

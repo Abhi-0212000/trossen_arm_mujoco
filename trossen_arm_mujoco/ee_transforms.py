@@ -98,6 +98,62 @@ def quat_conjugate(q: np.ndarray) -> np.ndarray:
     return np.array([q[0], -q[1], -q[2], -q[3]])
 
 
+def ortho6d_to_quaternion(ortho6d: np.ndarray) -> np.ndarray:
+    """
+    Convert 6D continuous rotation representation to quaternion.
+    
+    Args:
+        ortho6d: (6,) array [r11, r21, r31, r12, r22, r32] (first two columns of rotation matrix)
+    
+    Returns:
+        quaternion: (4,) array [w, x, y, z]
+    """
+    # Reshape to (3, 2)
+    r_raw = ortho6d.reshape(3, 2, order='F') # Column-major reshape to match [col1, col2]
+    # ortho6d = [r11, r21, r31, r12, r22, r32]
+    #           |--- v1 ---|  |--- v2 ---|
+    # r_raw[:, 0] = v1 = [r11, r21, r31]  (first column of R)
+    # r_raw[:, 1] = v2 = [r12, r22, r32]  (second column of R)
+    
+    # Gram-Schmidt orthogonalization
+    a1 = r_raw[:, 0]  # v1
+    a2 = r_raw[:, 1]  # v2
+    
+    # u1 = v1 / ||v1||  (normalize first vector)
+    b1 = a1 / np.linalg.norm(a1)
+
+    # u2 = v2 - (u1^T * v2) * u1  (remove projection onto u1)
+    # Then normalize
+    b2 = a2 - np.dot(b1, a2) * b1
+    b2 = b2 / np.linalg.norm(b2)
+
+    # u3 = u1 × u2  (cross product gives third orthonormal vector)
+    b3 = np.cross(b1, b2)
+
+    # Construct rotation matrix 3x3
+    matrix = np.stack([b1, b2, b3], axis=1)
+    
+    # Convert to quaternion [x, y, z, w] -> [w, x, y, z]
+    rot = R.from_matrix(matrix)
+    quat_xyzw = rot.as_quat()
+    return np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
+
+
+def euler_to_quaternion(euler: np.ndarray) -> np.ndarray:
+    """
+    Convert Euler angles (XYZ) to quaternion.
+    
+    Args:
+        euler: (3,) array [roll, pitch, yaw] in radians
+    
+    Returns:
+        quaternion: (4,) array [w, x, y, z]
+    """
+    rot = R.from_euler('xyz', euler)
+    quat_xyzw = rot.as_quat()
+    return np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
+
+
 def quat_rotate_vector(q: np.ndarray, v: np.ndarray) -> np.ndarray:
     """
     Rotate a vector by a unit quaternion.
@@ -347,3 +403,128 @@ def sim_mocap_to_robot_frame(
     right_robot_frame = np.concatenate([right_pos, right_quat])
     
     return left_robot_frame, right_robot_frame
+
+def quat_to_ortho6d(quat: np.ndarray) -> np.ndarray:
+    """
+    Convert quaternion to 6D rotation representation (ortho6d).
+    
+    Args:
+        quat: (N, 4) array in [w, x, y, z] format (MuJoCo standard)
+    Returns:
+        ortho6d: (N, 6) array
+    """
+    # Scipy expects [x, y, z, w]
+    # MuJoCo provides [w, x, y, z]
+    if quat.ndim == 1:
+        quat = quat.reshape(1, 4)
+        
+    quat_scipy = np.concatenate([quat[:, 1:], quat[:, 0:1]], axis=1)
+    
+    rot = R.from_quat(quat_scipy)
+    matrix = rot.as_matrix()  # (N, 3, 3)
+    
+    # Take first two columns: R[:, 0] and R[:, 1]
+    # Flatten them: [r11, r21, r31, r12, r22, r32]
+    ortho6d = matrix[:, :, :2].transpose(0, 2, 1).reshape(-1, 6)
+    return ortho6d
+
+def convert_dual_arm_angle_axis_to_quat_action(action_14d: np.ndarray) -> np.ndarray:
+    """
+    Convert 14D angle-axis EE action to 16D quaternion EE action for dual arm.
+    
+    Input format (14D):
+        [L_Pos(3), L_AA(3), L_Grip(1), R_Pos(3), R_AA(3), R_Grip(1)]
+        
+    Output format (16D):
+        [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+    """
+    # Left arm: [0:3] pos, [3:6] angle-axis, [6] gripper
+    left_pos = action_14d[0:3]
+    left_aa = action_14d[3:6]
+    left_grip = action_14d[6]
+    left_quat = angle_axis_to_quaternion(left_aa)
+    
+    # Right arm: [7:10] pos, [10:13] angle-axis, [13] gripper
+    right_pos = action_14d[7:10]
+    right_aa = action_14d[10:13]
+    right_grip = action_14d[13]
+    right_quat = angle_axis_to_quaternion(right_aa)
+    
+    # Combine into 16D action
+    action_16d = np.concatenate([
+        left_pos,      # 3
+        left_quat,     # 4
+        [left_grip],   # 1
+        right_pos,     # 3
+        right_quat,    # 4
+        [right_grip],  # 1
+    ])
+    return action_16d
+
+
+def convert_dual_arm_ortho6d_to_quat_action(action_20d: np.ndarray) -> np.ndarray:
+    """
+    Convert 20D ortho6d EE action to 16D quaternion EE action for dual arm.
+    
+    Input format (20D):
+        [L_Pos(3), L_Ortho(6), L_Grip(1), R_Pos(3), R_Ortho(6), R_Grip(1)]
+        
+    Output format (16D):
+        [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+    """
+    # Left arm: [0:3] pos, [3:9] ortho6d, [9] gripper
+    left_pos = action_20d[0:3]
+    left_ortho = action_20d[3:9]
+    left_grip = action_20d[9]
+    left_quat = ortho6d_to_quaternion(left_ortho)
+    
+    # Right arm: [10:13] pos, [13:19] ortho6d, [19] gripper
+    right_pos = action_20d[10:13]
+    right_ortho = action_20d[13:19]
+    right_grip = action_20d[19]
+    right_quat = ortho6d_to_quaternion(right_ortho)
+    
+    # Combine into 16D action
+    action_16d = np.concatenate([
+        left_pos,      # 3
+        left_quat,     # 4
+        [left_grip],   # 1
+        right_pos,     # 3
+        right_quat,    # 4
+        [right_grip],  # 1
+    ])
+    return action_16d
+
+
+def convert_dual_arm_euler_to_quat_action(action_14d: np.ndarray) -> np.ndarray:
+    """
+    Convert 14D euler EE action to 16D quaternion EE action for dual arm.
+    
+    Input format (14D):
+        [L_Pos(3), L_Euler(3), L_Grip(1), R_Pos(3), R_Euler(3), R_Grip(1)]
+        
+    Output format (16D):
+        [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+    """
+    # Left arm: [0:3] pos, [3:6] euler, [6] gripper
+    left_pos = action_14d[0:3]
+    left_euler = action_14d[3:6]
+    left_grip = action_14d[6]
+    left_quat = euler_to_quaternion(left_euler)
+    
+    # Right arm: [7:10] pos, [10:13] euler, [13] gripper
+    right_pos = action_14d[7:10]
+    right_euler = action_14d[10:13]
+    right_grip = action_14d[13]
+    right_quat = euler_to_quaternion(right_euler)
+    
+    # Combine into 16D action
+    action_16d = np.concatenate([
+        left_pos,      # 3
+        left_quat,     # 4
+        [left_grip],   # 1
+        right_pos,     # 3
+        right_quat,    # 4
+        [right_grip],  # 1
+    ])
+    return action_16d

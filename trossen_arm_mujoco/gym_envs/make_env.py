@@ -3,7 +3,8 @@ Convenience functions for creating SERL-compatible Trossen environments.
 
 Control Modes:
     - 'joint': 14D actions [L_Arm(6), L_Grip(1), R_Arm(6), R_Grip(1)]
-    - 'ee': 16D actions [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+    - 'ee' or 'quat': 16D actions [L_Pos(3), L_Quat(4), L_Grip(1), R_Pos(3), R_Quat(4), R_Grip(1)]
+    - 'ee_angle_axis': 14D actions [L_Pos(3), L_AA(3), L_Grip(1), R_Pos(3), R_AA(3), R_Grip(1)]
 """
 
 from dm_control import composer
@@ -25,7 +26,7 @@ def make_cube_stacking_env(
     recorder_mode: bool = False,
     data_save_path: str = "data_collection",
     data_save_every_n: int = 1,
-    control_mode: Literal["joint", "ee"] = "joint",
+    control_mode: Literal["joint", "ee", "quat", "ee_angle_axis", "ortho6d", "euler"] = "joint",
 ) -> SERLGymWrapper:
     """
     Create a Cube Stacking environment.
@@ -43,7 +44,12 @@ def make_cube_stacking_env(
         recorder_mode: If True, enable interactive data recording GUI
         data_save_path: Path to save recorded episodes
         data_save_every_n: Save data every N steps (1=50Hz, 5=10Hz, etc.)
-        control_mode: 'joint' for 14D joint control, 'ee' for 16D end-effector control
+        control_mode: 
+            'joint': 14D joint control
+            'ee' or 'quat': 16D end-effector control (quaternion)
+            'ee_angle_axis': 14D end-effector control (angle-axis)
+            'ortho6d': 20D end-effector control (ortho6d)
+            'euler': 14D end-effector control (euler)
     
     Returns:
         SERLGymWrapper instance wrapping dm_control environment
@@ -64,12 +70,26 @@ def make_cube_stacking_env(
         task_class = CubeStacking
         xml_file = "trossen_ai_scene_joint.xml"
         action_dim = 14
-    elif control_mode == "ee":
+        state_obs_dim = 32  # 16 qpos + 16 qvel
+    elif control_mode in ["ee", "quat", "ee_angle_axis", "ortho6d", "euler"]:
         task_class = CubeStackingEE
         xml_file = "trossen_ai_scene.xml"
-        action_dim = 16
+        
+        if control_mode == "ee_angle_axis":
+            action_dim = 14
+            state_obs_dim = 14
+        elif control_mode == "ortho6d":
+            action_dim = 20
+            state_obs_dim = 20
+        elif control_mode == "euler":
+            action_dim = 14
+            state_obs_dim = 14
+        else: # ee or quat (quaternion)
+            action_dim = 16
+            state_obs_dim = 16  # 16D state for quat mode
+            
     else:
-        raise ValueError(f"control_mode must be 'joint' or 'ee', got '{control_mode}'")
+        raise ValueError(f"control_mode must be 'joint', 'ee', 'quat', 'ee_angle_axis', 'ortho6d', or 'euler', got '{control_mode}'")
     
     # Create dm_control environment (unless fake_env)
     dm_env = None
@@ -85,7 +105,7 @@ def make_cube_stacking_env(
     # Wrap with Gym wrapper
     gym_env = SERLGymWrapper(
         env=dm_env,
-        state_obs_dim=32,  # 16 qpos + 16 qvel
+        state_obs_dim=state_obs_dim,
         fake_env=fake_env,
         image_obs=image_obs,
         stats_path=stats_path,
