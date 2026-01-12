@@ -40,39 +40,71 @@ import numpy as np
 from trossen_arm_mujoco.constants import ASSETS_DIR, DT
 
 
-def sample_box_pose() -> np.ndarray:
+def sample_box_pose(seed: int = None, rng: np.random.Generator = None) -> np.ndarray:
     """
     Generate a random pose for a cube within predefined position ranges.
+    
+    The spawn area is constrained to:
+    - Small centered area to ensure robot can reach
+    - Avoid the blue target box (at y=0.22, size 0.1x0.1)
+    - Stay within robot reach
+    - Stay on the table surface
+    
+    Blue box: centered at (0, 0.22), extends from x=[-0.1, 0.1], y=[0.12, 0.32]
+    Safe spawn area: small center zone, well away from blue box
 
+    Args:
+        seed: Optional random seed for reproducibility. If provided, creates a new RNG.
+        rng: Optional numpy random Generator. If provided, uses this instead of seed.
+             Takes precedence over seed if both are provided.
+             If neither seed nor rng is provided, uses global np.random state.
+    
     :return: A 7D array containing the sampled position ``[x, y, z, w, x, y, z]`` representing the
         cube's position and orientation as a quaternion.
     """
-    x_range = [-0.1, 0.2]
-    y_range = [-0.15, 0.15]
+    # Visualized in ./dataset_utils/visualize_bbox.py validate_action_sampling()
+    x_range = [0.03, 0.1]
+    y_range = [-0.02, 0.1]
     z_range = [0.0125, 0.0125]
 
     ranges = np.vstack([x_range, y_range, z_range])
-    cube_position = np.random.uniform(ranges[:, 0], ranges[:, 1])
+    
+    # Choose random source based on arguments
+    if rng is not None:
+        # Use provided Generator
+        print(f"[DEBUG] Sampling box pose with provided RNG")
+        cube_position = rng.uniform(ranges[:, 0], ranges[:, 1])
+    elif seed is not None:
+        # Create seeded Generator for this call only
+        print(f"[DEBUG] Sampling box pose with seed {seed}")
+        local_rng = np.random.default_rng(seed)
+        cube_position = local_rng.uniform(ranges[:, 0], ranges[:, 1])
+    else:
+        # Use global numpy random state (respects np.random.seed())
+        cube_position = np.random.uniform(ranges[:, 0], ranges[:, 1])
 
     cube_quat = np.array([1, 0, 0, 0])
+    # cube_position = np.array([-3.76365857e-03,  1.35211311e-02,  1.13459624e-02])
+    # cube_position = np.array([ 0.11381228, -0.00127775,  0.01345779])
+    
     return np.concatenate([cube_position, cube_quat])
 
 
 def get_observation_base(
     physics: Physics,
     cam_list: list[str],
-    on_screen_render: bool = True,
+    image_obs: bool = True,
 ) -> collections.OrderedDict:
     """
     Capture image observations from multiple cameras in the simulation.
 
     :param physics: The simulation physics instance.
     :param cam_list: List of camera names to capture images from.
-    :param on_screen_render: Whether to capture images from cameras, defaults to ``True``.
+    :param image_obs: Whether to capture images from cameras, defaults to ``True``.
     :return: A dictionary containing image observations.
     """
     obs: collections.OrderedDict = collections.OrderedDict()
-    if on_screen_render:
+    if image_obs and cam_list:
         obs["images"] = dict()
         for cam in cam_list:
             obs["images"][cam] = physics.render(height=480, width=640, camera_id=cam)
@@ -85,6 +117,8 @@ def make_sim_env(
     task_name: str = "sim_transfer_cube",
     onscreen_render: bool = False,
     cam_list: list[str] = [],
+    control_timestep: float = DT,
+    physics_timestep: float = None,
 ):
     """
     Create a simulated environment for bimanual robotic manipulation.
@@ -94,11 +128,19 @@ def make_sim_env(
     :param task_name: Name of the task, defaults to ``'sim_transfer_cube'``.
     :param onscreen_render: Whether to render the simulation on-screen, defaults to ``False``.
     :param cam_list: List of camera names to be used, defaults to ``[]``.
+    :param control_timestep: The control timestep for the environment, defaults to ``DT``.
+    :param physics_timestep: The physics timestep for the environment, defaults to ``None`` (automatic).
     :return: The simulated robot environment.
     """
     if "sim_transfer_cube" in task_name:
         assets_path = os.path.join(ASSETS_DIR, xml_file)
         physics = mujoco.Physics.from_xml_path(assets_path)
+        # Override physics timestep if physics_timestep is provided
+        if physics_timestep is not None and control_timestep is not None:
+            physics.model.opt.timestep = physics_timestep
+            n_sub_steps = int(control_timestep / physics_timestep)
+        else:
+            n_sub_steps = None
         task = task_class(
             random=False,
             onscreen_render=onscreen_render,
@@ -111,8 +153,8 @@ def make_sim_env(
         physics,
         task,
         time_limit=20,
-        control_timestep=DT,
-        n_sub_steps=None,
+        control_timestep=None,
+        n_sub_steps=n_sub_steps,
         flat_observation=False,
     )
 
@@ -153,7 +195,7 @@ def plot_observation_images(observation: dict, cam_list: list[str]) -> list[Axes
             plt_imgs.append(axs[i].imshow(images[cam]))
             axs[i].set_title(titles.get(cam, cam))
 
-    for ax in axs.flat:
+    for ax in axs:
         ax.axis("off")
 
     plt.ion()
@@ -182,3 +224,27 @@ def set_observation_images(
 
     plt.pause(0.02)
     return plt_imgs
+
+
+def pretty_print_obs(obs, indent=0):
+    pad = " " * indent
+    print("\n=== Observation Dump ===" if indent == 0 else "")
+    for k, v in obs.items():
+        print(f"\n{pad}Key: {k}")
+        if isinstance(v, dict):
+            print(f"{pad}  Type: dict")
+            # recurse into nested dict
+            pretty_print_obs(v, indent=indent+4)
+        elif isinstance(v, np.ndarray):
+            print(f"{pad}  Type: {type(v)}")
+            print(f"{pad}  Shape: {v.shape}")
+            print(f"{pad}  Dtype: {v.dtype}")
+            if "cam" in k.lower():
+                print(f"{pad}  Values: <skipped for camera data>")
+            else:
+                print(f"{pad}  Values:\n{pad}{v}")
+        else:
+            print(f"{pad}  Type: {type(v)}")
+            print(f"{pad}  Value:\n{pad}{v}")
+    if indent == 0:
+        print("\n========================\n")

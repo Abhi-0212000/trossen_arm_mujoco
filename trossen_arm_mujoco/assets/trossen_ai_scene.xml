@@ -62,23 +62,112 @@
 
 
     <body mocap="true" name="mocap_left" pos="-0.2062 -0.019 0.1835">
-        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_left_site1" rgba="1 0 0 1"/>
-        <site pos="0 0 0" size="0.0003 0.03 0.0003" type="box" name="mocap_left_site2" rgba="1 0 0 1"/>
-        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_left_site3" rgba="1 0 0 1"/>
+        <!-- <geom type="sphere" size="0.01" rgba="0 1 1 0.5" group="2" contype="0" conaffinity="0"/> -->
+        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_left_site1" rgba="1 0 0 0"/>
+        <site pos="0 0 0" size="0.0003 0.03 0.0003" type="box" name="mocap_left_site2" rgba="1 0 0 0"/>
+        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_left_site3" rgba="1 0 0 0"/>
     </body>
     <body mocap="true" name="mocap_right" pos="0.2062 -0.019 0.1835">
-        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_right_site1" rgba="1 0 0 1"/>
-        <site pos="0 0 0" size="0.0003 0.03 0.0003" type="box" name="mocap_right_site2" rgba="1 0 0 1"/>
-        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_right_site3" rgba="1 0 0 1"/>
+        <!-- <geom type="sphere" size="0.01" rgba="1 1 0 0.5" group="2" contype="0" conaffinity="0"/> -->
+        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_right_site1" rgba="1 0 0 0"/>
+        <site pos="0 0 0" size="0.0003 0.03 0.0003" type="box" name="mocap_right_site2" rgba="1 0 0 0"/>
+        <site pos="0 0 0" size="0.0003 0.0003 0.03" type="box" name="mocap_right_site3" rgba="1 0 0 0"/>
     </body>
 
 
-    <body name="box" pos="0.0 0.0 0.0125">
-        <joint name="red_box_joint" type="free" frictionloss="0.01" />
-        <inertial pos="0 0 0" mass="0.05" diaginertia="0.002 0.002 0.002" />
-        <geom condim="4" solimp="2 1 0.01" solref="0.01 1" friction="5.0 4 0.01" pos="0 0 0" size="0.0125 0.0125 0.0125" type="box" name="red_box" rgba="1 0 0 1" />
-    </body>
+  <body name="box" pos="0.0 0.0 0.0125">
+    <joint name="red_box_joint" type="free" frictionloss="0.01" />
+    <inertial pos="0 0 0" mass="0.05" diaginertia="0.002 0.002 0.002" />
+
+    <!-- Main visual cube (no collision) -->
+    <geom name="red_box_visual"
+          type="box"
+          pos="0 0 0"
+          size="0.0125 0.0125 0.0125"
+          rgba="1 0 0 1"
+          contype="0"
+          conaffinity="0"
+          />
+    
+    <!-- Center marker dot -->
+    <!-- <geom name="center_marker"
+          type="sphere"
+          pos="0 0 0"
+          size="0.003"
+          rgba="0 1 0 1"
+          contype="0"
+          conaffinity="0"
+          /> -->
+
+    <!-- Internal collision cubes -->
+    <!-- All invisible, now made rigid -->
+
+    <!-- C1: +x +y -->
+    <geom name="subcube1"
+          type="box"
+          pos="0.00625 0.00625 0"
+          size="0.00625 0.00625 0.0125"
+          rgba="0 0 0 0"
+          contype="1"
+          conaffinity="1"
+          solref="0.001 1"
+          solimp="0.99 0.99 0.001"
+          friction="4.5 0.005 0.001"
+          />
+
+    <!-- C2: -x +y -->
+    <geom name="subcube2"
+          type="box"
+          pos="-0.00625 0.00625 0"
+          size="0.00625 0.00625 0.0125"
+          rgba="0 0 0 0"
+          contype="1"
+          conaffinity="1"
+          solref="0.001 1"
+          solimp="0.99 0.99 0.001"
+          friction="4.5 0.005 0.001"
+          />
+
+    <!-- C3: +x -y -->
+    <geom name="subcube3"
+          type="box"
+          pos="0.00625 -0.00625 0"
+          size="0.00625 0.00625 0.0125"
+          rgba="0 0 0 0"
+          contype="1"
+          conaffinity="1"
+          solref="0.001 1"
+          solimp="0.99 0.99 0.001"
+          friction="4.5 0.005 0.001"
+          />
+
+    <!-- C4: -x -y -->
+    <geom name="subcube4"
+          type="box"
+          pos="-0.00625 -0.00625 0"
+          size="0.00625 0.00625 0.0125"
+          rgba="0 0 0 0"
+          contype="1"
+          conaffinity="1"
+          solref="0.001 1"
+          solimp="0.99 0.99 0.001"
+          friction="4.5 0.005 0.001"
+          />
+
+
+  </body>
+
     <geom name="white_wall" pos="0 0.5 0.05" size="10 0.05 1" type="box" material="white_wall"/>
+
+    <!-- Blue target box - MODIFIED: was pos="0.0 0.22 0.02" size="0.1 0.1 0.15" -->
+    <body name="static_box" pos="0.0 0.27 0.02">
+      <geom name="table_box"
+            type="box"
+            size="0.07 0.07 0.15"
+            rgba="0 0 1 1"
+            friction="1 0.005 0.0001"/>
+    </body>
+
     <geom name="floor" size="20 20 0.05" type="plane" material="carpet" pos="0 0 -.75"/>
     <site name="worldref" pos="0 0 -0.75"/>
     <camera name="cam_high" pos="0 -0.303794 1.02524" euler="0 0 0.4363" resolution="1920 1080" mode="fixed"  focal="1.93e-3 1.93e-3" sensorsize="0.0037 0.0021"/>
@@ -87,7 +176,41 @@
 
     <geom mesh="tabletop" material="table" class="visual" pos="0 0 -0.75" quat="1 0 0 1"/>
     <geom mesh="tablelegs" material="table" class="visual" pos="0 0 -0.75" quat="1 0 0 1"/>
-    <geom name="table" pos="0 0 -0.1009" size="0.61 0.37 0.1" type="box" conaffinity="1" contype="1"/>
+    <geom name="table_collision" type="box" 
+      size="0.605 0.38 0.02"
+      pos="0 0 -0.019"
+      contype="1" conaffinity="1"
+      solref="0.001 1"
+      solimp="0.99 0.99 0.001"
+      group="3" />
+    
+    <!-- ===========================================================   -->
+    <!-- Workspace Bounding Boxes (Visual Only) conversion formula pos (Center) = (Max + Min) / 2 and size(Half-Extents) = (Max - Min) / 2-->
+    <!-- LEFT ARM BOUNDS: [-0.25,-0.13,0.05] to [-0.125,0.1,0.355] -->
+    <!-- <geom name="left_arm_bounds" type="box"
+      pos="-0.1875 -0.015 0.2025"
+      size="0.0625 0.115 0.1525"
+      rgba="1.0 0.0 0.0 0.1"
+      contype="0" conaffinity="0"
+      group="1" /> -->
+    
+    <!-- RIGHT ARM BOUNDS: [-0.1,-0.15,-0.02] to [0.275,0.33,0.35] -->
+    <!-- <geom name="right_arm_bounds" type="box"
+      pos="0.0875 0.09 0.165"
+      size="0.1875 0.24 0.185"
+      rgba="0.0 1.0 0.0 0.1"
+      contype="0" conaffinity="0"
+      group="1" /> -->
+    
+    <!-- CUBE SPAWN REGION: [-0.05,-0.1,0.0125] to [0.2,0.1,0.0125] -->
+    <!-- <geom name="cube_spawn_bounds" type="box"
+      pos="0.075 0.0 0.0125"
+      size="0.125 0.1 0.0001"
+      rgba="1.0 0.5 0.0 0.2"
+      contype="0" conaffinity="0"
+      group="1" />
+    ===========================================================   -->
+    <!-- <geom name ="sphere_visual" type="sphere" pos="0.27290477 -0.0191183   0.19654108" size="0.02" rgba="0 1 0 1" contype="0" conaffinity="0"/> -->
     <geom class="frame" pos="0.44 -0.361 1.03" quat="0 1 0 1" mesh="extrusion_2040_880"/>
     <geom class="frame" pos="0.44 -0.371 0.61" quat="1 0 -1 0" mesh="extrusion_150"/>
     <geom class="frame" pos="0 -0.303794 1.02524" quat="0 0 0.976296 0.21644" mesh="d405_solid"/>
@@ -119,5 +242,17 @@
     <geom class="frame" pos="-0.6 -0.26 0.12" quat="0.923 0.382 0 0" material="metal" mesh="angled_extrusion"/>
     <geom class="frame" pos="0.43 -0.361 1.02" quat="0 0 0 1" mesh="extrusion_2040_1000"/>
     <geom class="frame" pos="0 -0.391 -0.01" quat="0 0 0 1" mesh="wormseye_mount"/>
+  
+  <!-- <geom name="viz_bbox_right" type="box" 
+      pos="0.15 0.075 0.315" 
+      size="0.30 0.275 0.235" 
+      rgba="0 1 0 0.2" 
+      contype="0" conaffinity="0" group="1"/> -->
+
+  <!-- <geom name="viz_bbox_left" type="box" 
+        pos="-0.205 -0.019 0.185" 
+        size="0.02 0.02 0.02" 
+        rgba="1 0 0 0.2" 
+        contype="0" conaffinity="0" group="1"/> -->
   </worldbody>
 </mujoco>
