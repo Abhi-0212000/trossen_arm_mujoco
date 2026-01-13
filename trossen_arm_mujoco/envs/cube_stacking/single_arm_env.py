@@ -280,6 +280,150 @@ class CubeStackingEE(TrossenAIStationaryEETask):
         """Get cube state (qpos[16:])."""
         return physics.data.qpos.copy()[16:]
 
+    # def get_reward_old(self, physics: Physics, verbose: bool = False) -> float:
+    #         """
+    #         Robust Staged Reward (Right Robot Only).
+    #         Ignores Left Robot (assumes it is masked/frozen).
+            
+    #         Stages:
+    #         1. Reach (0-1): Gripper -> Cube
+    #         2. Grasp (1-2): Gripper Encloses Cube
+    #         3. Lift  (2-3): Cube Height > Table
+    #         4. Align (3-4): Cube -> Target XY
+    #         5. Place (4-5): Cube on Target + Stable + Gripper Open
+    #         """
+    #         # ==========================
+    #         # 1. CONSTANTS & GEOMETRY
+    #         # ==========================
+    #         # --- Blue Box Geometry (Derived from XML) ---
+    #         # XML pos="0.0 0.27 0.02", size="0.07 0.07 0.15" (half-extents)
+    #         BOX_X = 0.0
+    #         BOX_Y = 0.27
+    #         BOX_Z_CENTER = 0.02
+    #         BOX_HALF_HEIGHT = 0.15
+            
+    #         # The physical top surface of the blue box
+    #         TARGET_TOP_SURFACE = BOX_Z_CENTER + BOX_HALF_HEIGHT  # 0.02 + 0.15 = 0.17 meters
+
+    #         # --- Target Definitions ---
+    #         # We align XY first (Stage 4), then drop Z (Stage 5)
+    #         TARGET_XY = np.array([BOX_X, BOX_Y]) 
+            
+    #         # --- Red Cube Geometry ---
+    #         CUBE_HEIGHT_HALF = 0.0125  # size="0.0125"
+            
+    #         # --- Thresholds ---
+    #         # Calculated Success Height (Where cube center should be when stacked)
+    #         # 0.17 (Box Top) + 0.0125 (Cube Half) = 0.1825m
+    #         STACKED_Z = TARGET_TOP_SURFACE + CUBE_HEIGHT_HALF 
+            
+    #         # Clearance Height (How high to lift before moving)
+    #         # We want to be slightly above the box top (e.g. +3cm) before moving sideways 
+    #         # to avoid hitting the edge.
+    #         SAFE_LIFT_Z = TARGET_TOP_SURFACE + 0.03  # 0.20m
+            
+    #         # Gripper
+    #         GRIPPER_OPEN_VAL = 0.03
+
+    #         # ==========================
+    #         # 2. STATE EXTRACTION
+    #         # ==========================
+    #         cube_pos = physics.data.qpos[16:19].copy()
+    #         cube_vel = physics.data.qvel[16:19]
+    #         cube_speed = np.linalg.norm(cube_vel)
+            
+    #         # Right Gripper Center
+    #         c_l = physics.named.data.xpos['right/carriage_left']
+    #         c_r = physics.named.data.xpos['right/carriage_right']
+    #         gripper_mid = (c_l + c_r) / 2.0
+    #         gripper_ctrl = physics.data.ctrl[1]
+            
+    #         if verbose:
+    #             print(f"\n[REWARD DEBUG]")
+    #             print(f"  Cube pos: {cube_pos}, speed: {cube_speed:.4f}")
+    #             print(f"  Gripper mid: {gripper_mid}, ctrl: {gripper_ctrl:.4f}")
+
+    #         # ==========================
+    #         # 3. CONTACT CHECK (Must run every step)
+    #         # ==========================
+    #         # We use a set for O(1) lookups. This is fast.
+    #         all_contacts = set()
+    #         for i in range(physics.data.ncon):
+    #             g1 = physics.model.id2name(physics.data.contact[i].geom1, 'geom')
+    #             g2 = physics.model.id2name(physics.data.contact[i].geom2, 'geom')
+    #             all_contacts.add(frozenset([g1, g2]))
+
+    #         cube_geom = "subcube1" 
+    #         gripper_geoms = ["right/gripper_follower_left", "right/gripper_follower_right"]
+    #         target_geom = "table_box"
+
+    #         is_touching_gripper = any(frozenset([cube_geom, g]) in all_contacts for g in gripper_geoms)
+    #         is_touching_target = frozenset([cube_geom, target_geom]) in all_contacts
+
+    #         # ==========================
+    #         # 4. REWARD CALCULATION
+    #         # ==========================
+    #         reward = 0.0
+
+    #         # --- Stage 1: Reach ---
+    #         dist_reach = np.linalg.norm(gripper_mid - cube_pos)
+    #         r_reach = 1.0 - np.tanh(4.0 * dist_reach)
+    #         reward += r_reach
+    #         if verbose: print(f"  Stage 1 (Reach): dist={dist_reach:.4f} -> r={r_reach:.4f}")
+
+    #         # --- Stage 2: Grasp ---
+    #         # Sweet spot: Cube is physically between the fingers (2cm to 7cm from base)
+    #         dist_to_base = np.linalg.norm(cube_pos - gripper_mid)
+    #         in_sweet_spot = (0.02 < dist_to_base < 0.07)
+            
+    #         r_grasp = 0.0
+    #         # Gating: Only checking grasp if we are somewhat close to avoid weird artifacts
+    #         if dist_reach < 0.1:
+    #             if in_sweet_spot: r_grasp += 0.3
+    #             if is_touching_gripper and gripper_ctrl > 0.002: r_grasp += 0.7
+    #         reward += r_grasp
+    #         if verbose: print(f"  Stage 2 (Grasp): sweet_spot={in_sweet_spot}, touching={is_touching_gripper} -> r={r_grasp:.4f}")
+
+    #         # --- Stage 3: Lift ---
+    #         # Gating: Must have good grasp score OR be resting on target (to preserve reward on placement)
+    #         r_lift = 0.0
+    #         if r_grasp > 0.5 or is_touching_target:
+    #             # Map current Z range [0.0125, SAFE_LIFT_Z] to [0, 1]
+    #             # Progress from Table Level -> Safe Lift Level
+    #             lift_progress = (cube_pos[2] - CUBE_HEIGHT_HALF) / (SAFE_LIFT_Z - CUBE_HEIGHT_HALF)
+    #             r_lift = np.clip(lift_progress, 0.0, 1.0)
+                
+    #             # If on target, we assume lift was successful and we are placing now,
+    #             # so we force max lift reward to prevent penalty for lowering.
+    #             if is_touching_target: r_lift = 1.0
+    #         reward += r_lift
+    #         if verbose: print(f"  Stage 3 (Lift): height={cube_pos[2]:.4f}, on_target={is_touching_target} -> r={r_lift:.4f}")
+
+    #         # --- Stage 4: Align ---
+    #         r_align = 0.0
+    #         # Only allow alignment reward if we are high enough to not hit the box
+    #         # OR if we have already landed on it.
+    #         if cube_pos[2] > TARGET_TOP_SURFACE or is_touching_target:
+    #             dist_xy = np.linalg.norm(cube_pos[:2] - TARGET_XY)
+    #             r_align = 1.0 - np.tanh(4.0 * dist_xy)
+    #         reward += r_align
+    #         if verbose: print(f"  Stage 4 (Align): dist_xy={np.linalg.norm(cube_pos[:2] - TARGET_XY):.4f} -> r={r_align:.4f}")
+
+    #         # --- Stage 5: Place ---
+    #         r_place = 0.0
+    #         if is_touching_target:
+    #             r_place += 0.3 # Contact bonus
+    #             if np.linalg.norm(cube_pos[:2] - TARGET_XY) < 0.05: r_place += 0.2 # Precision XY
+    #             # Old: if gripper_ctrl > 0.02: r_place += 0.3
+    #             # New: Boost to 1.5 so Release (1.5) > Grasp (1.0)
+    #             if gripper_ctrl > 0.02: r_place += 1.5
+    #             if cube_speed < 0.1: r_place += 0.2 # Stability
+    #         reward += r_place
+    #         if verbose: print(f"  Stage 5 (Place): on_target={is_touching_target} -> r={r_place:.4f}\n  TOTAL REWARD: {reward:.4f}\n")
+
+    #         return reward
+
+
     def get_reward(self, physics: Physics, verbose: bool = False) -> float:
             """
             Robust Staged Reward (Right Robot Only).
@@ -295,7 +439,7 @@ class CubeStackingEE(TrossenAIStationaryEETask):
             # ==========================
             # 1. CONSTANTS & GEOMETRY
             # ==========================
-            # --- Blue Box Geometry (Derived from XML) ---
+            # --- Blue Box Geometry ---
             # XML pos="0.0 0.27 0.02", size="0.07 0.07 0.15" (half-extents)
             BOX_X = 0.0
             BOX_Y = 0.27
@@ -306,24 +450,24 @@ class CubeStackingEE(TrossenAIStationaryEETask):
             TARGET_TOP_SURFACE = BOX_Z_CENTER + BOX_HALF_HEIGHT  # 0.02 + 0.15 = 0.17 meters
 
             # --- Target Definitions ---
-            # We align XY first (Stage 4), then drop Z (Stage 5)
             TARGET_XY = np.array([BOX_X, BOX_Y]) 
             
             # --- Red Cube Geometry ---
             CUBE_HEIGHT_HALF = 0.0125  # size="0.0125"
             
             # --- Thresholds ---
-            # Calculated Success Height (Where cube center should be when stacked)
-            # 0.17 (Box Top) + 0.0125 (Cube Half) = 0.1825m
-            STACKED_Z = TARGET_TOP_SURFACE + CUBE_HEIGHT_HALF 
-            
-            # Clearance Height (How high to lift before moving)
-            # We want to be slightly above the box top (e.g. +3cm) before moving sideways 
-            # to avoid hitting the edge.
+            # [STRICT ANTI-EXPLOIT] Minimum Valid Z Height
+            # Normal Table Height: ~0.0125m
+            # Side Penetration Height: ~0.0125m (The "Sponge" Zone)
+            # Valid Stacked Height: 0.1825m (0.17 + 0.0125)
+            #
+            # We set the cutoff at 0.172m. 
+            # This is 2mm ABOVE the box surface. 
+            # Even if the robot pushes the cube "through" the side, it will be below this.
+            MIN_VALID_Z = 0.172 
+
+            # Clearance Height (Lift target)
             SAFE_LIFT_Z = TARGET_TOP_SURFACE + 0.03  # 0.20m
-            
-            # Gripper
-            GRIPPER_OPEN_VAL = 0.03
 
             # ==========================
             # 2. STATE EXTRACTION
@@ -340,13 +484,11 @@ class CubeStackingEE(TrossenAIStationaryEETask):
             
             if verbose:
                 print(f"\n[REWARD DEBUG]")
-                print(f"  Cube pos: {cube_pos}, speed: {cube_speed:.4f}")
-                print(f"  Gripper mid: {gripper_mid}, ctrl: {gripper_ctrl:.4f}")
+                print(f"  Cube Z: {cube_pos[2]:.4f} (Threshold: {MIN_VALID_Z})")
 
             # ==========================
-            # 3. CONTACT CHECK (Must run every step)
+            # 3. CONTACT CHECK
             # ==========================
-            # We use a set for O(1) lookups. This is fast.
             all_contacts = set()
             for i in range(physics.data.ncon):
                 g1 = physics.model.id2name(physics.data.contact[i].geom1, 'geom')
@@ -369,59 +511,65 @@ class CubeStackingEE(TrossenAIStationaryEETask):
             dist_reach = np.linalg.norm(gripper_mid - cube_pos)
             r_reach = 1.0 - np.tanh(4.0 * dist_reach)
             reward += r_reach
-            if verbose: print(f"  Stage 1 (Reach): dist={dist_reach:.4f} -> r={r_reach:.4f}")
 
             # --- Stage 2: Grasp ---
-            # Sweet spot: Cube is physically between the fingers (2cm to 7cm from base)
             dist_to_base = np.linalg.norm(cube_pos - gripper_mid)
             in_sweet_spot = (0.02 < dist_to_base < 0.07)
             
             r_grasp = 0.0
-            # Gating: Only checking grasp if we are somewhat close to avoid weird artifacts
             if dist_reach < 0.1:
                 if in_sweet_spot: r_grasp += 0.3
                 if is_touching_gripper and gripper_ctrl > 0.002: r_grasp += 0.7
             reward += r_grasp
-            if verbose: print(f"  Stage 2 (Grasp): sweet_spot={in_sweet_spot}, touching={is_touching_gripper} -> r={r_grasp:.4f}")
 
             # --- Stage 3: Lift ---
-            # Gating: Must have good grasp score OR be resting on target (to preserve reward on placement)
+            # [STRICT LOGIC]: 
+            # To get "Placement" credit, you must be touching target AND be above the box.
+            # If you are "sponging" through the side, Z will be ~0.01, so this is False.
+            valid_placement = is_touching_target and (cube_pos[2] > MIN_VALID_Z)
+
             r_lift = 0.0
-            if r_grasp > 0.5 or is_touching_target:
-                # Map current Z range [0.0125, SAFE_LIFT_Z] to [0, 1]
-                # Progress from Table Level -> Safe Lift Level
+            # We allow lift points if we are grasping well OR if we have successfully placed it.
+            if r_grasp > 0.5 or valid_placement:
                 lift_progress = (cube_pos[2] - CUBE_HEIGHT_HALF) / (SAFE_LIFT_Z - CUBE_HEIGHT_HALF)
                 r_lift = np.clip(lift_progress, 0.0, 1.0)
                 
-                # If on target, we assume lift was successful and we are placing now,
-                # so we force max lift reward to prevent penalty for lowering.
-                if is_touching_target: r_lift = 1.0
+                # If validly placed, force max lift reward (keeps value stable after release)
+                if valid_placement: r_lift = 1.0
+            
             reward += r_lift
-            if verbose: print(f"  Stage 3 (Lift): height={cube_pos[2]:.4f}, on_target={is_touching_target} -> r={r_lift:.4f}")
 
             # --- Stage 4: Align ---
             r_align = 0.0
-            # Only allow alignment reward if we are high enough to not hit the box
-            # OR if we have already landed on it.
-            if cube_pos[2] > TARGET_TOP_SURFACE or is_touching_target:
+            # Unlock only if lifted high enough (0.8) OR if validly placed.
+            # This prevents sliding across the table because r_lift will be 0.0 on the table.
+            if r_lift > 0.8:
                 dist_xy = np.linalg.norm(cube_pos[:2] - TARGET_XY)
                 r_align = 1.0 - np.tanh(4.0 * dist_xy)
             reward += r_align
-            if verbose: print(f"  Stage 4 (Align): dist_xy={np.linalg.norm(cube_pos[:2] - TARGET_XY):.4f} -> r={r_align:.4f}")
 
             # --- Stage 5: Place ---
             r_place = 0.0
-            if is_touching_target:
+            
+            # [ANTI-EXPLOIT]: Only give placement/release points if valid_placement is True.
+            # If the robot pushes against the side, valid_placement is False, so r_place stays 0.
+            if valid_placement:
                 r_place += 0.3 # Contact bonus
-                if np.linalg.norm(cube_pos[:2] - TARGET_XY) < 0.05: r_place += 0.2 # Precision XY
-                # Old: if gripper_ctrl > 0.02: r_place += 0.3
-                # New: Boost to 1.5 so Release (1.5) > Grasp (1.0)
+                if np.linalg.norm(cube_pos[:2] - TARGET_XY) < 0.05: r_place += 0.2 # Precision
+                
+                # Big Release Bonus: 1.5 > 1.0 (Grasp). Net profit +0.5 for letting go.
                 if gripper_ctrl > 0.02: r_place += 1.5
+                
                 if cube_speed < 0.1: r_place += 0.2 # Stability
+            
             reward += r_place
-            if verbose: print(f"  Stage 5 (Place): on_target={is_touching_target} -> r={r_place:.4f}\n  TOTAL REWARD: {reward:.4f}\n")
+            
+            if verbose: 
+                print(f"  Stage 5 (Place): valid_placement={valid_placement} -> r={r_place:.4f}")
+                print(f"  TOTAL REWARD: {reward:.4f}\n")
 
             return reward
+
 
     def check_task_success(self, physics: Physics) -> bool:
         """
@@ -895,9 +1043,15 @@ class SERLGymWrapper(gym.Env):
         # ======================================================================
         
         # Task success detection: Simple reward threshold
-        # Based on reward function: Stage 5 completion gives ~4.0+ reward
-        # Success = reward > 3.9 (cube on target, gripper open, stable)
-        SUCCESS_REWARD_THRESHOLD = 4.35
+        # Max reward breakdown (with valid_placement):
+        #   Stage 1 (Reach): 1.0
+        #   Stage 2 (Grasp): 1.0
+        #   Stage 3 (Lift):  1.0
+        #   Stage 4 (Align): 1.0
+        #   Stage 5 (Place): 2.2 (0.3 contact + 0.2 precision + 1.5 release + 0.2 stable)
+        # Total: 6.2 max
+        # Success threshold: Need reach + grasp + lift + place basics = ~4.5+
+        SUCCESS_REWARD_THRESHOLD = 4.5
         is_success = reward > SUCCESS_REWARD_THRESHOLD
         
         # Update episode stats
@@ -1167,6 +1321,7 @@ def regenerate_ds_state_from_obs(pkl_file_path: str, output_file_path: str):
     PHYSICS_TIMESTEP = 0.002
     cam_list = ["cam_high", "cam_low", "cam_left_wrist", "cam_right_wrist"]
     onscreen_render = False
+    MAX_TIME_LIMIT = 10.0  # seconds
 
     # Load and analyze dataset
     transitions = load_transitions(pkl_file_path)
@@ -1175,7 +1330,7 @@ def regenerate_ds_state_from_obs(pkl_file_path: str, output_file_path: str):
     
     # Calculate Max Episode Length (round up to clean number)
     percentile_90 = np.percentile(episode_lengths, 90.0)
-    max_episode_length = int(np.ceil(percentile_90 + 20))
+    max_episode_length = int(np.ceil(percentile_90 + 10))
     
     print(f"\n{'='*80}")
     print(f"DATASET STATS:")
@@ -1184,9 +1339,11 @@ def regenerate_ds_state_from_obs(pkl_file_path: str, output_file_path: str):
     print(f"  90th percentile: {percentile_90:.1f} → max_episode_length = {max_episode_length}")
     print(f"\nEXPECTED BEHAVIOR:")
     print(f"  Episode duration: {max_episode_length} steps × {CONTROL_TIMESTEP}s = {max_episode_length * CONTROL_TIMESTEP:.2f}s")
-    print(f"  Time limit: 20.0s → terminated will be FALSE, truncated will be TRUE")
+    print(f"  Time limit: {MAX_TIME_LIMIT}s → terminated will be FALSE, truncated will be TRUE")
     print(f"  Result: masks = 1 - terminated = 1.0 (correct for RLPD!)")
     print(f"{'='*80}\n")
+
+    time.sleep(2)  # Pause for readability
 
     dm_env = make_sim_env(
         CubeStackingEE,
@@ -1203,7 +1360,7 @@ def regenerate_ds_state_from_obs(pkl_file_path: str, output_file_path: str):
         onscreen_render=onscreen_render,
         cam_list=cam_list,
         action_dim=7,  # RIGHT ARM ONLY
-        time_limit=20.0,
+        time_limit=MAX_TIME_LIMIT,
         control_mode="delta",
         max_episode_length=max_episode_length, 
         action_scale=[0.025, 0.1, 0.005], 
@@ -1350,11 +1507,13 @@ def test_data_replay_sim_env(pkl_file_path, episode_indices=None):
     print(f"shape of state in first transition: {np.array(transitions[0]['observations']['state']).shape}")
     print(f"shape of action in first transition: {np.array(transitions[0]['actions']).shape}")
 
-    CONTROL_TIMESTEP = 0.02  # 50 Hz control frequency
-    PHYSICS_TIMESTEP = 0.002  # 10 substeps per control step
-
-    onscreen_render = True  # Set to False for faster checking
+    CONTROL_TIMESTEP = 0.02
+    PHYSICS_TIMESTEP = 0.002
     cam_list = ["cam_high", "cam_low", "cam_left_wrist", "cam_right_wrist"]
+    onscreen_render = True
+    MAX_TIME_LIMIT = 10.0  # seconds
+    max_episode_length = 158
+
     dm_env = make_sim_env(
         CubeStackingEE,
         task_name="sim_transfer_cube",
@@ -1370,9 +1529,9 @@ def test_data_replay_sim_env(pkl_file_path, episode_indices=None):
         onscreen_render = onscreen_render,
         cam_list = cam_list,
         action_dim = 7,
-        time_limit = 20.0,
+        time_limit = MAX_TIME_LIMIT,
         control_mode = "delta",
-        max_episode_length = 180,
+        max_episode_length = max_episode_length,
         action_scale = [0.025, 0.1, 0.005],  # Position, Rotation, Gripper (was 0.05, too large!)
     )
     gym_env = SERLObsWrapper(gym_env)
@@ -1454,7 +1613,7 @@ def test_data_replay_sim_env(pkl_file_path, episode_indices=None):
             state_from_ds_to_check = transition['next_observations']['state']
             match = check_states_match(state_from_ds_to_check, state_from_obs, tolerance=1e-3, verbose=True)
             state_check_results.append(match)
-            print(f"Step {t}: reward={reward}, done={done}")
+            # print(f"Step {t}: reward={reward}, done={done}")
             if done:
                 print("Episode ended early.")
                 break
@@ -1543,16 +1702,16 @@ def delete_specific_episodes_and_save(input_file_path: str = None, output_file_p
 
 if __name__ == "__main__":
     # --- Test data replay ---
-    # INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/trossen_arm_mujoco/trossen_arm_mujoco/tasks/RL/Right_robot_stacking_cube/only_right_arm_data_regenerated.pkl"
-    # test_data_replay_sim_env(INPUT_FILE_PATH, episode_indices=[0, 1, 4, 5, 9, 11, 13])
+    # INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data_regenerated.pkl"
+    # test_data_replay_sim_env(INPUT_FILE_PATH, episode_indices=[i for i in range(60, 68)])
     
     # --- Regenerate dataset from observations ---
     # Auto-set max_episode_length based on dataset (max length + 100 buffer)
-    INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/examples/experiments/cube_stacking_gym/only_right_arm_data_regenerated_final.pkl"
-    OUTPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/examples/experiments/cube_stacking_gym/only_right_arm_data_regenerated_final.pkl"
-    regenerate_ds_state_from_obs(INPUT_FILE_PATH, OUTPUT_FILE_PATH)
+    # INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data.pkl"
+    # OUTPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data_regenerated.pkl"
+    # regenerate_ds_state_from_obs(INPUT_FILE_PATH, OUTPUT_FILE_PATH)
 
     # Delete specific episodes from dataset
-    # INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/trossen_arm_mujoco/trossen_arm_mujoco/tasks/RL/Right_robot_stacking_cube/only_right_arm_data_regenerated.pkl"
-    # OUTPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/trossen_arm_mujoco/trossen_arm_mujoco/tasks/RL/Right_robot_stacking_cube/only_right_arm_data_regenerated_final.pkl"
-    # delete_specific_episodes_and_save(INPUT_FILE_PATH, OUTPUT_FILE_PATH, episodes_to_delete=[1, 4, 13])
+    INPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data_regenerated.pkl"
+    OUTPUT_FILE_PATH = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data_regenerated_deleted.pkl"
+    delete_specific_episodes_and_save(INPUT_FILE_PATH, OUTPUT_FILE_PATH, episodes_to_delete=[1, 4, 13, 20, 26, 34, 42, 54, 65])

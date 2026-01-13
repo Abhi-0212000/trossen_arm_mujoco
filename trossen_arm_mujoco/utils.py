@@ -178,8 +178,21 @@ def plot_observation_images(observation: dict, cam_list: list[str]) -> list[Axes
     else:
         cols = min(3, num_cameras)  # Maximum of 3 columns
         rows = (num_cameras + cols - 1) // cols  # Compute rows dynamically
-    _, axs = plt.subplots(rows, cols, figsize=(10, 10))
+    
+    # CRITICAL: Enable interactive mode BEFORE creating figure
+    plt.ion()
+    
+    fig, axs = plt.subplots(rows, cols, figsize=(10, 10))
     axs = axs.flatten() if isinstance(axs, (list, np.ndarray)) else [axs]
+
+    # CRITICAL: Configure figure to NOT steal focus during updates
+    # This prevents the window from grabbing focus when plt.pause() is called
+    fig.canvas.manager.set_window_title("Camera Views")
+    try:
+        # Try to prevent focus stealing (works on most backends)
+        fig.canvas.manager.window.attributes('-topmost', False)
+    except:
+        pass  # Not all backends support this
 
     plt_imgs: list[AxesImage] = []
     titles = {
@@ -197,8 +210,11 @@ def plot_observation_images(observation: dict, cam_list: list[str]) -> list[Axes
 
     for ax in axs:
         ax.axis("off")
+    
+    # Force initial draw
+    plt.draw()
+    plt.pause(0.001)  # Minimal pause to show window
 
-    plt.ion()
     return plt_imgs
 
 
@@ -208,7 +224,7 @@ def set_observation_images(
     cam_list: list[str],
 ) -> list[AxesImage]:
     """
-    Update displayed observation images dynamically.
+    Update displayed observation images dynamically WITHOUT stealing focus.
 
     :param observation: The observation data containing updated images.
     :param plt_imgs: A list of AxesImage objects for dynamic updates.
@@ -222,7 +238,11 @@ def set_observation_images(
         if cam in images and i < len(plt_imgs):
             plt_imgs[i].set_data(images[cam])
 
-    plt.pause(0.02)
+    # CRITICAL: Use flush_events() instead of pause() to prevent focus stealing
+    # This updates the plot without blocking or stealing focus
+    plt.gcf().canvas.draw_idle()  # Mark for redraw
+    plt.gcf().canvas.flush_events()  # Process events without blocking
+    
     return plt_imgs
 
 

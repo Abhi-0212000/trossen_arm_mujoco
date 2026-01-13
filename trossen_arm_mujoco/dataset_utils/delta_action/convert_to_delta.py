@@ -4,7 +4,7 @@ import pickle
 import time
 from scipy.spatial.transform import Rotation as R
 from typing import Union, List
-from trossen_arm_mujoco.dataset_utils.delta_action_ds.cleanup_utils import load_transitions, get_episode_boundaries, pretty_print_obs, quaternion_to_angle_axis, wrap_angle
+from trossen_arm_mujoco.dataset_utils.delta_action.cleanup_utils import load_transitions, get_episode_boundaries, pretty_print_obs, quaternion_to_angle_axis, wrap_angle
 from trossen_arm_mujoco.ee_transforms import action_14d_robot_to_world_aa
 from typing import Union, List
 
@@ -1159,5 +1159,6 @@ if __name__ == "__main__":
 
 
     # Visualize binary gripper values convert back to origiginal physical scale as per env.step function
-    file_path = "/home/qte9489/personal_abhi/temp/hil-serl/trossen_arm_mujoco/trossen_arm_mujoco/tasks/RL/Right_robot_stacking_cube/only_right_arm_data_regenerated_final.pkl"
-    visualize_absolute_gripper_trajectory(file_path, episode_indices=[0,1,2,3,4,5], action_scale_gripper=0.02)
+    file_path = "/home/qte9489/personal_abhi/temp/hil-serl/train_data_sets/test1/only_right_arm_data_regenerated_deleted.pkl"
+    # visualize_absolute_gripper_trajectory(file_path, episode_indices=[0,1,2,3,4,5], action_scale_gripper=0.005)
+    visualize_data(file_path, 'gripper', episode_indices=[0], data_source='action')

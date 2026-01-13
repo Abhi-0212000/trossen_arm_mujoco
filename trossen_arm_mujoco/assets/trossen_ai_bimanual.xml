@@ -2,7 +2,7 @@
   <compiler angle="radian" meshdir="meshes" texturedir="meshes" eulerseq="ZYX" autolimits="true"/>
 
   <option iterations="50" timestep="0.001" solver="PGS" gravity="0 0 -9.81" />
-
+  <!-- <option iterations="100" timestep="0.001" solver="Newton" tolerance="1e-10" gravity="0 0 -9.81" /> -->
 
 
   <asset>
